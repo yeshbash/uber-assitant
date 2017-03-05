@@ -5,8 +5,13 @@ import requests
 import json
 
 app = Flask(__name__)
-SERVER_TOKEN = "XXXX"
 
+# Application Server Token
+SERVER_TOKEN = "XXXX-Application's Server Token-XXXXX"
+
+
+
+# Domain model of User context shared between API.AI and WebHook
 class USER_CONTEXT :
     NAME="user_context"
     START_LAT="start_latitude"
@@ -19,34 +24,48 @@ class USER_CONTEXT :
     PRODUCT_NAME="product_name"
     REQUEST_ID="request_id"
 
-#Fulfillment web hook code
+
+
 @app.route("/agent/uber/fulfillment", methods=["POST"])
 def fulfillment():
-    #Route based on action
-    #try:
-        apiai_req = request.get_json(silent=True, force=True)
-        print("Request:")
-        print(json.dumps(apiai_req, indent=4))
+    """"
+    API.AI Backend Webhook controller. Common for all the endpoints originating from API.AI agent
 
-        action = apiai_req.get("result").get("action")
-        if action == "uber.type":
-            return uber_types_handler(apiai_req.get("result"),SERVER_TOKEN)
-        if action =="uber.estimate":
-            return uber_estimate_handler(apiai_req, SERVER_TOKEN)
-        if action =="uber.confirm":
-            return uber_confirm_handler(apiai_req)
-    #except:
-     #   return jsonify({"status":"Runtime Error"})
+    :param
+        request: HTTP Post Payload. API.AI webshook request format
+    :return:
+        response: API.AI webhook response format
+
+    """
+    #Route based on action
+    apiai_req = request.get_json(silent=True, force=True)
+
+    print("Request:")
+    print(json.dumps(apiai_req, indent=4))
+    action = apiai_req.get("result").get("action")
+    if action == "uber.type":
+        return uber_types_handler(apiai_req.get("result"),SERVER_TOKEN) #Handles ride options between Point A and Point B
+    if action =="uber.estimate":
+        return uber_estimate_handler(apiai_req, SERVER_TOKEN) #Handles Ride Price Estimations
+    if action =="uber.confirm":
+        return uber_confirm_handler(apiai_req) #Handles Final Ride Confirmations
+
 
 def uber_confirm_handler(request):
-
+    """
+    :param request: API.AI Webhook format
+    :return: API.AI Webhook Response format
+    """
     reqeust_response = {}
+
+    #USER_CONTEXT content processing
     context = get_context(request.get("result"),USER_CONTEXT.NAME)
     context_params = context.get("parameters")
 
     user_token = request.get("originalRequest").get("data").get("user").get("access_token")
     request_endpoint ="https://sandbox-api.uber.com/v1.2/requests"
 
+    #Prepare request for the requests API POST invocation
     payload = {
         USER_CONTEXT.FARE_ID : context_params.get(USER_CONTEXT.FARE_ID),
         USER_CONTEXT.START_LAT : context_params.get(USER_CONTEXT.START_LAT),
@@ -65,14 +84,20 @@ def uber_confirm_handler(request):
     print(json.dumps(payload, indent=4))
     print(json.dumps(header, indent=4))
 
+    #Establishing request using reqeuests API
     response = requests.post(request_endpoint,json=payload,headers=header)
-    if response.status_code == 202:
-        eta = response.get("eta")
-        speech = "Yay!! Your ride has been requested. E.T.A is approximately {} mins"
-        speech = speech.format(eta)
-        context_params[USER_CONTEXT.REQUEST_ID] = response.get("USER_CONTEXT.REQUEST_ID")
-        reqeust_response = prepare_webhookresponse(text=speech,speech= speech,context=context)
+    eta = response.json().get("eta")
+
+    #Preparing Response for API.AI
+    speech = "Yay!! Your ride has been requested. E.T.A is approximately {} mins"
+    speech = speech.format(eta)
+
+    #Updating Response USER_CONTEXT with trip request Id.
+    context_params[USER_CONTEXT.REQUEST_ID] = response.json().get("USER_CONTEXT.REQUEST_ID")
+    reqeust_response = prepare_webhookresponse(text=speech,speech= speech,context=context)
+
     return reqeust_response
+
 
 def uber_types_handler(result,server_token):
     """"
@@ -89,7 +114,8 @@ def uber_types_handler(result,server_token):
     prodtypes_res = {}
     if result is not None and result!= {}:
         arguments = result.get("parameters")
-        # Establising Uber Session
+
+        # Establising Uber Session using UBER python SDK
         session = Session(server_token=server_token)
         uber_client = UberRidesClient(session)
 
@@ -188,7 +214,7 @@ def get_products(lattitude,longitude,client):
 def get_porductid_from_name(product_name,lat,lng,uber_client):
 
     products = get_products(lat,lng,uber_client)
-    product_id = [id.get("product_id") for id in products if id.get("display_name") ==product_name]
+    product_id = [id.get("product_id") for id in products if id.get("display_name").lower() ==product_name.lower()]
 
     if len(product_id)>0: return product_id[0]
     else: return ""
