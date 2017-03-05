@@ -5,7 +5,7 @@ import requests
 import json
 
 app = Flask(__name__)
-SERVER_TOKEN = "6uqLj36m41d8EQ1w70K3EGeCGC576VPBLzv_o6eL"
+SERVER_TOKEN = "XXXX"
 
 class USER_CONTEXT :
     NAME="user_context"
